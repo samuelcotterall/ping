@@ -1,0 +1,253 @@
+<!doctype html>
+<html class="no-js" lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+	<title>WebRTC Demo</title>
+	<meta name="description" content="">
+	<meta name="author" content="">
+
+	<meta name="viewport" content="width=device-width">
+
+	<link rel="stylesheet" href="css/style.css">
+	<link rel="canonical" href="{{ room_link }}"/>
+
+	<script src="js/libs/modernizr-2.5.3-respond-1.1.0.min.js"></script>
+
+</head>
+<body>
+<div role="main">
+	<div class="wrap">		
+
+					<video width="640" height="480" id="localVideo" autoplay="autoplay" onclick="onClick()"></video>
+
+			
+				<div id="game-container">
+					<canvas id="theirCanvas" width="640" height="480" ></canvas>
+					<video width="560" height="420" id="remoteVideo" autoplay="autoplay"></video>
+					<div id="their-table"></div>
+					<div id="ball"></div>					
+					<canvas id="can" width="640"height="480"></canvas>
+					<div id="my-table"></div>										
+					<div id="me"></div>	
+					<canvas id="myCanvas" width="560" height="420" ></canvas>													
+					<ul id="scoreboard">
+						<li><b></b> <span>0</span></li>
+						<li><b></b> <span>0</span></li>
+					</ul>
+				</div>
+			
+	</div>
+</div>
+<footer id="footer">
+	<div class="wrap">
+	</div>
+</footer>
+
+<input type="hidden" id="vars" initiator="{{ initiator }}" room_key="{{ room_key }}" token="{{ token }}" me="{{ me }}">
+
+
+<script type="text/javascript" src="/_ah/channel/jsapi"></script>
+<script src="js/libs/jquery-1.7.1.min.js"></script>
+<script src="js/script.js"></script>
+<script>
+var localVideo;
+var remoteVideo;
+var localStream;  
+var channel;
+var channelReady = false;
+var pc;
+var initiator = {{ initiator }};
+var started = false; 
+
+initialize = function() {
+  console.log("Initializing; room={{ room_key }}.");
+  localVideo = document.getElementById("localVideo");
+  remoteVideo = document.getElementById("remoteVideo");
+  status = document.getElementById("status");
+  resetStatus();
+  openChannel();
+  getUserMedia();
+  //createPeerConnection();    
+}
+
+openChannel = function() {
+  console.log("Opening channel.");
+  var channel = new goog.appengine.Channel('{{ token }}');
+  var handler = {
+    'onopen': onChannelOpened,
+    'onmessage': onChannelMessage,
+    'onerror': onChannelError,
+    'onclose': onChannelClosed
+  };
+  socket = channel.open(handler);    
+}
+  
+resetStatus = function() {
+	return false;
+  if (!initiator) {
+    setStatus("Waiting for someone to join: <a href=\"{{ room_link }}\">{{ room_link }}</a>");
+  } else {
+    setStatus("Initializing...");
+  }
+}
+
+getUserMedia = function() {
+  try { 
+    navigator.webkitGetUserMedia("video,audio", onUserMediaSuccess,
+                                 onUserMediaError);
+    console.log("Requested access to local media.");
+  } catch (e) {
+    console.log("getUserMedia error.");    
+  }
+}
+  
+createPeerConnection = function() {
+  pc = new webkitDeprecatedPeerConnection("STUN stun.l.google.com:19302",
+                                onSignalingMessage);  
+  pc.onconnecting = onSessionConnecting;
+  pc.onopen = onSessionOpened;
+  pc.onaddstream = onRemoteStreamAdded;
+  pc.onremovestream = onRemoteStreamRemoved;    
+}
+    
+maybeStart = function() {
+  if (!started && localStream && channelReady) {      
+    setStatus("Connecting..."); 
+    console.log("Creating PeerConnection.");
+    createPeerConnection();  
+    console.log("Adding local stream.");      
+    pc.addStream(localStream);
+    started = true;
+  }
+}
+     
+setStatus = function(state) {
+  footer.innerHTML = state;
+}
+  
+updateGameData = function(path, message) {
+
+	message = JSON.stringify(message);
+  path += '?r={{ room_key }}' + '&u={{ me }}';
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', path, true);
+  console.log("updateGameData", message);
+  xhr.send(message);
+}
+  
+onGameData = function(message) {
+	message = JSON.parse(message) 
+	console.log('onGameData', message.ball); 
+
+  // if (message.data.ball){
+  // 	  console.log("RECIEVED");
+  // 	  ping.gameData = message.data;
+  // 	  ping.updateScoreboard();
+  //   }
+  //   
+}
+  
+  
+sendMessage = function(path, message) {
+	// console.log('sendMessage(',path, message,')');
+  // console.log('C->S: ', message); 
+  path += '?r={{ room_key }}' + '&u={{ me }}';
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', path, true);
+  console.log("YOUR MESSAGE", message);
+  xhr.send(message);
+}
+  
+onChannelOpened = function() {    
+  console.log('Channel opened.');
+  channelReady = true;
+  if (initiator) maybeStart();
+}
+onChannelMessage = function(message) {
+
+  // console.log('C->S: ', message); 
+  
+  if (message.data != 'BYE') {
+	  // console.log('A')
+    if (message.data.indexOf("\"ERROR\"", 0) == -1 && message.data.indexOf("\"ball\"", 0) == -1) {        
+	  // console.log('1')		
+      if (!initiator && !started) maybeStart();
+      pc.processSignalingMessage(message.data);    
+    } else {
+	  // console.log('2')
+		message = JSON.parse(message.data) 
+		ping.handleNewData(message);
+		ping.ballPosition();
+    }
+  } else {
+	  // console.log('B')	  
+    console.log('Session terminated.');    
+    remoteVideo.src = null;
+    remoteVideo.style.opacity = 0;
+    initiator = 0;
+    started = false;
+    resetStatus();
+  }
+}
+onChannelError = function() {    
+  console.log('Channel error.');
+}
+onChannelClosed = function() {    
+  console.log('Channel closed.');
+}
+    
+onUserMediaSuccess = function(stream) {
+  console.log("User has granted access to local media.");
+  var url = webkitURL.createObjectURL(stream);
+  localVideo.style.opacity = 1;
+  localVideo.src = url;
+  localStream = stream;
+  if (initiator) maybeStart();    
+}
+onUserMediaError = function(error) {
+  console.log("Failed to get access to local media. Error code was " + error.code);
+  alert("Failed to get access to local media. Error code was " + error.code + ".");    
+}
+  
+onSignalingMessage = function(message) {      
+  sendMessage('/message', message);
+}
+onSessionConnecting = function(message) {      
+  console.log("Session connecting.");
+}
+onSessionOpened = function(message) {      
+  console.log("Session opened.");
+}
+onRemoteStreamAdded = function(event) {   
+  console.log("Remote stream added.");
+  var url = webkitURL.createObjectURL(event.stream);
+  remoteVideo.style.opacity = 1;
+  remoteVideo.src = url;
+  setStatus("<input type=\"button\" id=\"hangup\" value=\"Hang up\" onclick=\"onHangup()\" />");
+}
+onRemoteStreamRemoved = function(event) {   
+  console.log("Remote stream removed.");
+}
+  
+onHangup = function() {
+  console.log("Hanging up.");    
+  localVideo.style.opacity = 0;    
+  remoteVideo.style.opacity = 0;    
+  pc.close();  
+  // will trigger BYE from server
+  socket.close(); 
+  pc = null;    
+  socket = null;
+  setStatus("You have left the call. <a href=\"{{ room_link }}\">Click here</a> to rejoin.");    
+}
+  
+setTimeout(initialize, 1);  
+
+	
+</script>
+</body>
+</html>
+
+
